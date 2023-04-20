@@ -59,7 +59,7 @@ func main() {
 	lmHashes := make([][]string, 0)
 	domains := make([]string, 0)
 	duplicatedAdmins := make([]string, 0)
-	csvRecords := [][]string{{"Count", "Hash", "Users"}}
+	NtlmCsvRecords := [][]string{{"Count", "Hash", "Users"}}
 
 	admins := make(map[string]string)
 
@@ -148,7 +148,7 @@ func main() {
 		for _, element := range mergedHashes {
 			if element.Count > 1 {
 				duplicatedHashes[element.Hash] = element
-				csvRecords = append(csvRecords, []string{strconv.Itoa(element.Count), element.Hash, strings.Join(element.Users, " - ")})
+				NtlmCsvRecords = append(NtlmCsvRecords, []string{strconv.Itoa(element.Count), element.Hash, strings.Join(element.Users, " - ")})
 				maskedHash := element.Hash[:5] + strings.Repeat("*", 12) + element.Hash[27:]
 				// Anyway to avoid the TrimSpace() needed below?
 				lines += fmt.Sprintf("\t\t%s & %d \\\\\n", maskedHash, element.Count)
@@ -178,7 +178,7 @@ func main() {
 			duplicatedAdmins: duplicatedAdmins,
 		}
 
-		writeToCsv(csvRecords, "duplicate_hashes.csv")
+		writeToCsv(NtlmCsvRecords, "duplicate_hashes.csv")
 		writeToCsv(lmHashes, "lm_hashes.csv")
 
 		writeLatex(lines)
