@@ -51,7 +51,6 @@ func main() {
 	indexedHashes := make(map[string][]string)
 	mergedHashes := make([]mergedHash, 0)
 
-	hashes := make([]string, 0)
 	enabledAccounts := 0
 	disabledAccounts := 0
 	computerAccounts := 0
@@ -108,9 +107,6 @@ func main() {
 				computerAccounts++
 			}
 
-			// not sure i actually need a slice with all hashes in, started out this way, kept it just in case
-			hashes = append(hashes, h.NTLM)
-
 			if !all && !h.Enabled {
 				continue
 			}
@@ -147,7 +143,7 @@ func main() {
 
 		// Should i initalise this here?
 		// Could also be an array and then.Join() at the end?
-		lines := ``
+		var lines string
 
 		for _, element := range mergedHashes {
 			if element.Count > 1 {
@@ -172,7 +168,7 @@ func main() {
 
 		valuesToPrint := values{
 			disabledAccounts: disabledAccounts,
-			hashes:           len(hashes),
+			hashes:           len(indexedHashes),
 			domains:          domains,
 			blankPasswords:   blankPasswords,
 			duplicatedHashes: len(duplicatedHashes),
