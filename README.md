@@ -21,7 +21,7 @@ You can pass 2 files as parameters
 
 
 ```shell
-go run . addump.txt admins.txt
+go run . examples.txt admins.txt
 ```
 
 ## Flags
