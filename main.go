@@ -95,6 +95,9 @@ func main() {
 		for sc.Scan() {
 			h, err := parseLine(sc.Text())
 			if err != nil {
+				// Is it worth trying to skip to the next iteration with 'continue'?
+				// problem is that these files can contain thousands of lines. I don't want an error for each line.
+				// then my only proposal is an errLineCount or something. if errLineCount >= 3 log.fatal...
 				log.Fatal(err)
 			}
 
@@ -135,6 +138,7 @@ func main() {
 			// 	admins[h.User] = h.NTLM
 			// }
 
+			// check if lm hash is blank value
 			if !strings.Contains(h.LM, "aad3b435b51404eeaad3b435b51404ee") {
 				lmHashes = append(lmHashes, []string{h.User, h.LM})
 			}
