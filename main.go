@@ -28,7 +28,7 @@ type mergedHash struct {
 	Hash  string
 }
 
-type values struct {
+type hashStats struct {
 	hashes           int
 	enabledAccounts  int
 	disabledAccounts int
@@ -65,7 +65,6 @@ func main() {
 
 	if adminsFile != "" {
 		file, err := os.Open(adminsFile)
-
 		if err != nil {
 			log.Fatalf("Error reading file: %s", err)
 		}
@@ -85,7 +84,6 @@ func main() {
 
 	if secretsFile != "" {
 		file, err := os.Open(secretsFile)
-
 		if err != nil {
 			log.Fatalf("Error reading file: %s", err)
 		}
@@ -95,7 +93,10 @@ func main() {
 		sc := bufio.NewScanner(file)
 
 		for sc.Scan() {
-			h := parseLine(sc.Text())
+			h, err := parseLine(sc.Text())
+			if err != nil {
+				log.Fatal(err)
+			}
 
 			if h.Enabled {
 				enabledAccounts++
@@ -121,10 +122,18 @@ func main() {
 
 			indexedHashes[h.NTLM] = append(indexedHashes[h.NTLM], h.User)
 
-			_, ok := admins[h.User]
-			if ok {
+			// In go we can combine variable declarations into our if statement and they’ll be within the scope of that if statement. Like this:
+			// In this example imagine everything before the ; is just on the previous line of code. But what it means is that the ok variable will get cleaned up at the end of the if block and
+			// won’t exist outside of the scope of the if block. Otherwise most of it looks pretty standard, maybe if I get home and understand what you’re doing a bit more I’ll have more
+			if _, ok := admins[h.User]; ok {
 				admins[h.User] = h.NTLM
 			}
+
+			// The above instead of this.
+			// _, ok := admins[h.User]
+			// if ok {
+			// 	admins[h.User] = h.NTLM
+			// }
 
 			if !strings.Contains(h.LM, "aad3b435b51404eeaad3b435b51404ee") {
 				lmHashes = append(lmHashes, []string{h.User, h.LM})
@@ -134,39 +143,32 @@ func main() {
 
 		for key, element := range indexedHashes {
 			mergedHashes = append(mergedHashes, mergedHash{Count: len(element), Hash: key, Users: element})
-
 		}
 
 		sort.Slice(mergedHashes, func(i, j int) bool {
 			return mergedHashes[i].Count > mergedHashes[j].Count
 		})
 
-		// Should i initalise this here?
-		// Could also be an array and then.Join() at the end?
-		var lines string
+		var lines []string
 
 		for _, element := range mergedHashes {
 			if element.Count > 1 {
 				duplicatedHashes[element.Hash] = element
 				NtlmCsvRecords = append(NtlmCsvRecords, []string{strconv.Itoa(element.Count), element.Hash, strings.Join(element.Users, " - ")})
+				// validate hash length
 				maskedHash := element.Hash[:5] + strings.Repeat("*", 12) + element.Hash[27:]
-				// Anyway to avoid the TrimSpace() needed below?
-				lines += fmt.Sprintf("\t\t%s & %d \\\\\n", maskedHash, element.Count)
+				lines = append(lines, fmt.Sprintf("\t\t%s & %d \\\\\n", maskedHash, element.Count))
 
 			}
 		}
 
 		for admin, hash := range admins {
-			_, ok := duplicatedHashes[hash]
-			if ok {
+			if _, ok := duplicatedHashes[hash]; ok {
 				duplicatedAdmins = append(duplicatedAdmins, admin)
 			}
 		}
 
-		// remove the extra line at the end
-		lines = strings.TrimSpace(lines)
-
-		valuesToPrint := values{
+		hashStats := hashStats{
 			disabledAccounts: disabledAccounts,
 			hashes:           len(indexedHashes),
 			domains:          domains,
@@ -178,15 +180,21 @@ func main() {
 			duplicatedAdmins: duplicatedAdmins,
 		}
 
-		writeToCsv(NtlmCsvRecords, "duplicate_hashes.csv")
-		writeToCsv(lmHashes, "lm_hashes.csv")
+		if err := writeToCsv(NtlmCsvRecords, "duplicate_hashes.csv"); err != nil {
+			log.Fatal(err)
+		}
 
-		writeLatex(lines)
+		if err := writeToCsv(lmHashes, "lm_hashes.csv"); err != nil {
+			log.Fatal(err)
+		}
 
-		printData(valuesToPrint, all)
+		if err := writeLatex(strings.TrimSpace(strings.Join(lines, ""))); err != nil {
+			log.Fatal(err)
+		}
+
+		printData(hashStats, all)
 
 	}
-
 }
 
 // Could of course just import the slices pkg, but this was a simple stack overflow solution
@@ -199,46 +207,47 @@ func contains(elems []string, v string) bool {
 	return false
 }
 
-func writeToCsv(records [][]string, filename string) {
+func writeToCsv(records [][]string, filename string) error {
 	csvFile, err := os.Create(filename)
-
 	if err != nil {
-		log.Fatalf("error creating file: %s", err)
+		return fmt.Errorf("error creating file: %s", filename)
 	}
 
 	csvWriter := csv.NewWriter(csvFile)
 
 	csvWriter.WriteAll(records)
+
+	return nil
 }
 
-func writeLatex(lines string) {
-	latexFile, err := os.Create("latex_table.txt")
-
+func writeLatex(lines string) error {
+	filename := "latex_table.txt"
+	latexFile, err := os.Create(filename)
 	if err != nil {
-		log.Fatalf("error creating file: %s", err)
+		return fmt.Errorf("error creating file: %s", filename)
 	}
 
 	latexString := strings.Replace(HASHES_LATEX, "%REPLACE_ME%", lines, 1)
 
 	latexFile.WriteString(latexString)
 
+	return nil
 }
 
-func parseLine(line string) hash {
+func parseLine(line string) (hash, error) {
 	if line == "" || !strings.Contains(line, ":") {
-		log.Fatal("string empty or incorrect format")
+		return hash{}, fmt.Errorf("line blank or incorrect format: %s", line)
 	}
 
 	s := strings.Split(line, ":")
 
-	if len(s) < 7 {
-		log.Fatal("Incorrect hash format")
+	if len(s) < 7 || len(s[3]) != 32 {
+		return hash{}, fmt.Errorf("error reading line: %s", line)
 	}
 
 	upn := strings.Split(s[0], "\\")
 
 	h := hash{
-		//User:    s[0], // + s[6] - to add enabled to name
 		LM:      s[2],
 		NTLM:    s[3],
 		Enabled: strings.Contains(s[6], "Enabled"),
@@ -251,11 +260,10 @@ func parseLine(line string) hash {
 		h.User = upn[0]
 	}
 
-	return h
-
+	return h, nil
 }
 
-func printData(v values, all bool) {
+func printData(v hashStats, all bool) {
 	printRed := color.New(color.Bold, color.FgRed).PrintlnFunc()
 	printGreen := color.New(color.Bold, color.FgGreen).PrintlnFunc()
 	printYellow := color.New(color.Bold, color.FgYellow).PrintlnFunc()
@@ -294,12 +302,10 @@ func printData(v values, all bool) {
 		printRed("Included Admins:\t", v.duplicatedAdmins)
 	} else {
 		printGreen("Included Admins:\t", v.duplicatedAdmins)
-
 	}
 
 	printYellow("\nLatex Table output to latex_table.txt")
 	printYellow("CSV output to duplicated_hashes.txt")
-
 }
 
 // TODO:
