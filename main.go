@@ -61,12 +61,165 @@ func main() {
 	duplicatedAdmins := make([]string, 0)
 	NtlmCsvRecords := [][]string{{"Count", "Hash", "Users"}}
 
+	if secretsFile == "" {
+		log.Fatal("No Secrets file passed")
+	}
+
+	admins, err := loadAdmins(adminsFile)
+	if err != nil {
+		log.Fatalf("Error loading admins: %s", err)
+	}
+
+	secrets, err := loadDump(secretsFile)
+	if err != nil {
+		log.Fatalf("Error loading secrets: %s", err)
+	}
+
+	for _, secret := range secrets {
+		h, err := parseLine(secret)
+		if err != nil {
+			// Is it worth trying to skip to the next iteration with 'continue'?
+			// problem is that these files can contain thousands of lines. I don't want an error for each line.
+			// then my only proposal is an errLineCount or something. if errLineCount >= 3 log.fatal...
+			log.Fatal(err)
+		}
+
+		if h.Enabled {
+			enabledAccounts++
+		} else {
+			disabledAccounts++
+		}
+
+		if strings.Contains(h.User, "$") {
+			computerAccounts++
+		}
+
+		if !all && !h.Enabled {
+			continue
+		}
+
+		if strings.Contains(h.NTLM, "31d6cfe0d16ae931b73c59d7e0c089c0") {
+			blankPasswords++
+		}
+
+		if h.Domain != "" && !contains(domains, strings.ToLower(h.Domain)) {
+			domains = append(domains, strings.ToLower(h.Domain))
+		}
+
+		indexedHashes[h.NTLM] = append(indexedHashes[h.NTLM], h.User)
+
+		// In go we can combine variable declarations into our if statement and they’ll be within the scope of that if statement. Like this:
+		// In this example imagine everything before the ; is just on the previous line of code. But what it means is that the ok variable will get cleaned up at the end of the if block and
+		// won’t exist outside of the scope of the if block. Otherwise most of it looks pretty standard, maybe if I get home and understand what you’re doing a bit more I’ll have more
+		if _, ok := admins[h.User]; ok {
+			admins[h.User] = h.NTLM
+		}
+
+		// The above instead of this.
+		// _, ok := admins[h.User]
+		// if ok {
+		// 	admins[h.User] = h.NTLM
+		// }
+
+		// check if lm hash is blank value
+		if !strings.Contains(h.LM, "aad3b435b51404eeaad3b435b51404ee") {
+			lmHashes = append(lmHashes, []string{h.User, h.LM})
+		}
+
+	}
+
+	for key, element := range indexedHashes {
+		mergedHashes = append(mergedHashes, mergedHash{Count: len(element), Hash: key, Users: element})
+	}
+
+	sort.Slice(mergedHashes, func(i, j int) bool {
+		return mergedHashes[i].Count > mergedHashes[j].Count
+	})
+
+	var lines []string
+
+	for _, element := range mergedHashes {
+		if element.Count > 1 {
+			duplicatedHashes[element.Hash] = element
+			NtlmCsvRecords = append(NtlmCsvRecords, []string{strconv.Itoa(element.Count), element.Hash, strings.Join(element.Users, " - ")})
+			// validate hash length
+			maskedHash := element.Hash[:5] + strings.Repeat("*", 12) + element.Hash[27:]
+			lines = append(lines, fmt.Sprintf("\t\t%s & %d \\\\\n", maskedHash, element.Count))
+
+		}
+	}
+
+	for admin, hash := range admins {
+		if _, ok := duplicatedHashes[hash]; ok {
+			duplicatedAdmins = append(duplicatedAdmins, admin)
+		}
+	}
+
+	hashStats := hashStats{
+		disabledAccounts: disabledAccounts,
+		hashes:           len(indexedHashes),
+		domains:          domains,
+		blankPasswords:   blankPasswords,
+		duplicatedHashes: len(duplicatedHashes),
+		enabledAccounts:  enabledAccounts,
+		computerAccounts: computerAccounts,
+		lmHashes:         len(lmHashes),
+		duplicatedAdmins: duplicatedAdmins,
+	}
+
+	if err := writeToCsv(NtlmCsvRecords, "duplicate_hashes.csv"); err != nil {
+		log.Fatal(err)
+	}
+
+	if err := writeToCsv(lmHashes, "lm_hashes.csv"); err != nil {
+		log.Fatal(err)
+	}
+
+	if err := writeLatex(strings.TrimSpace(strings.Join(lines, ""))); err != nil {
+		log.Fatal(err)
+	}
+
+	printData(hashStats, all)
+}
+
+// Could of course just import the slices pkg, but this was a simple stack overflow solution
+func contains(elems []string, v string) bool {
+	for _, s := range elems {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+func loadDump(secretsFile string) ([]string, error) {
+	secrets := make([]string, 0)
+
+	if secretsFile != "" {
+		file, err := os.Open(secretsFile)
+		if err != nil {
+			return secrets, fmt.Errorf("error reading file: %s", secrets)
+		}
+
+		defer file.Close()
+
+		sc := bufio.NewScanner(file)
+
+		for sc.Scan() {
+			secrets = append(secrets, sc.Text())
+		}
+	}
+
+	return secrets, nil
+}
+
+func loadAdmins(adminsFile string) (map[string]string, error) {
 	admins := make(map[string]string)
 
 	if adminsFile != "" {
 		file, err := os.Open(adminsFile)
 		if err != nil {
-			log.Fatalf("Error reading file: %s", err)
+			return admins, fmt.Errorf("error reading file: %s", adminsFile)
 		}
 
 		defer file.Close()
@@ -81,134 +234,7 @@ func main() {
 		}
 		file.Close()
 	}
-
-	if secretsFile != "" {
-		file, err := os.Open(secretsFile)
-		if err != nil {
-			log.Fatalf("Error reading file: %s", err)
-		}
-
-		defer file.Close()
-
-		sc := bufio.NewScanner(file)
-
-		for sc.Scan() {
-			h, err := parseLine(sc.Text())
-			if err != nil {
-				// Is it worth trying to skip to the next iteration with 'continue'?
-				// problem is that these files can contain thousands of lines. I don't want an error for each line.
-				// then my only proposal is an errLineCount or something. if errLineCount >= 3 log.fatal...
-				log.Fatal(err)
-			}
-
-			if h.Enabled {
-				enabledAccounts++
-			} else {
-				disabledAccounts++
-			}
-
-			if strings.Contains(h.User, "$") {
-				computerAccounts++
-			}
-
-			if !all && !h.Enabled {
-				continue
-			}
-
-			if strings.Contains(h.NTLM, "31d6cfe0d16ae931b73c59d7e0c089c0") {
-				blankPasswords++
-			}
-
-			if h.Domain != "" && !contains(domains, strings.ToLower(h.Domain)) {
-				domains = append(domains, strings.ToLower(h.Domain))
-			}
-
-			indexedHashes[h.NTLM] = append(indexedHashes[h.NTLM], h.User)
-
-			// In go we can combine variable declarations into our if statement and they’ll be within the scope of that if statement. Like this:
-			// In this example imagine everything before the ; is just on the previous line of code. But what it means is that the ok variable will get cleaned up at the end of the if block and
-			// won’t exist outside of the scope of the if block. Otherwise most of it looks pretty standard, maybe if I get home and understand what you’re doing a bit more I’ll have more
-			if _, ok := admins[h.User]; ok {
-				admins[h.User] = h.NTLM
-			}
-
-			// The above instead of this.
-			// _, ok := admins[h.User]
-			// if ok {
-			// 	admins[h.User] = h.NTLM
-			// }
-
-			// check if lm hash is blank value
-			if !strings.Contains(h.LM, "aad3b435b51404eeaad3b435b51404ee") {
-				lmHashes = append(lmHashes, []string{h.User, h.LM})
-			}
-
-		}
-
-		for key, element := range indexedHashes {
-			mergedHashes = append(mergedHashes, mergedHash{Count: len(element), Hash: key, Users: element})
-		}
-
-		sort.Slice(mergedHashes, func(i, j int) bool {
-			return mergedHashes[i].Count > mergedHashes[j].Count
-		})
-
-		var lines []string
-
-		for _, element := range mergedHashes {
-			if element.Count > 1 {
-				duplicatedHashes[element.Hash] = element
-				NtlmCsvRecords = append(NtlmCsvRecords, []string{strconv.Itoa(element.Count), element.Hash, strings.Join(element.Users, " - ")})
-				// validate hash length
-				maskedHash := element.Hash[:5] + strings.Repeat("*", 12) + element.Hash[27:]
-				lines = append(lines, fmt.Sprintf("\t\t%s & %d \\\\\n", maskedHash, element.Count))
-
-			}
-		}
-
-		for admin, hash := range admins {
-			if _, ok := duplicatedHashes[hash]; ok {
-				duplicatedAdmins = append(duplicatedAdmins, admin)
-			}
-		}
-
-		hashStats := hashStats{
-			disabledAccounts: disabledAccounts,
-			hashes:           len(indexedHashes),
-			domains:          domains,
-			blankPasswords:   blankPasswords,
-			duplicatedHashes: len(duplicatedHashes),
-			enabledAccounts:  enabledAccounts,
-			computerAccounts: computerAccounts,
-			lmHashes:         len(lmHashes),
-			duplicatedAdmins: duplicatedAdmins,
-		}
-
-		if err := writeToCsv(NtlmCsvRecords, "duplicate_hashes.csv"); err != nil {
-			log.Fatal(err)
-		}
-
-		if err := writeToCsv(lmHashes, "lm_hashes.csv"); err != nil {
-			log.Fatal(err)
-		}
-
-		if err := writeLatex(strings.TrimSpace(strings.Join(lines, ""))); err != nil {
-			log.Fatal(err)
-		}
-
-		printData(hashStats, all)
-
-	}
-}
-
-// Could of course just import the slices pkg, but this was a simple stack overflow solution
-func contains(elems []string, v string) bool {
-	for _, s := range elems {
-		if v == s {
-			return true
-		}
-	}
-	return false
+	return admins, nil
 }
 
 func writeToCsv(records [][]string, filename string) error {
