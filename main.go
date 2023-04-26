@@ -48,16 +48,16 @@ func main() {
 	secretsFile := flag.Arg(0)
 	adminsFile := flag.Arg(1)
 
-	indexedHashes := make(map[string][]string)
+	// indexedHashes := make(map[string][]string)
 	mergedHashes := make([]mergedHash, 0)
 
-	enabledAccounts := 0
-	disabledAccounts := 0
-	computerAccounts := 0
-	blankPasswords := 0
+	// enabledAccounts := 0
+	// disabledAccounts := 0
+	// computerAccounts := 0
+	// blankPasswords := 0
 	duplicatedHashes := make(map[string]mergedHash)
-	lmHashes := make([][]string, 0)
-	domains := make([]string, 0)
+	// lmHashes := make([][]string, 0)
+	// domains := make([]string, 0)
 	duplicatedAdmins := make([]string, 0)
 	NtlmCsvRecords := [][]string{{"Count", "Hash", "Users"}}
 
@@ -65,15 +65,104 @@ func main() {
 		log.Fatal("No Secrets file passed")
 	}
 
+	secrets, err := loadDump(secretsFile)
+	if err != nil {
+		log.Fatalf("Error loading secrets: %s", err)
+	}
+
 	admins, err := loadAdmins(adminsFile)
 	if err != nil {
 		log.Fatalf("Error loading admins: %s", err)
 	}
 
-	secrets, err := loadDump(secretsFile)
+	parsedSecrets, err := parseSecrets(secrets, all, admins)
 	if err != nil {
-		log.Fatalf("Error loading secrets: %s", err)
+		log.Fatalf("Error parsing secrets %s", err)
 	}
+
+	for key, element := range parsedSecrets.indexedHashes {
+		mergedHashes = append(mergedHashes, mergedHash{Count: len(element), Hash: key, Users: element})
+	}
+
+	sort.Slice(mergedHashes, func(i, j int) bool {
+		return mergedHashes[i].Count > mergedHashes[j].Count
+	})
+
+	var lines []string
+
+	for _, element := range mergedHashes {
+		if element.Count > 1 {
+			duplicatedHashes[element.Hash] = element
+			NtlmCsvRecords = append(NtlmCsvRecords, []string{strconv.Itoa(element.Count), element.Hash, strings.Join(element.Users, " - ")})
+			// validate hash length
+			maskedHash := element.Hash[:5] + strings.Repeat("*", 12) + element.Hash[27:]
+			lines = append(lines, fmt.Sprintf("\t\t%s & %d \\\\\n", maskedHash, element.Count))
+
+		}
+	}
+
+	for admin, hash := range admins {
+		if _, ok := duplicatedHashes[hash]; ok {
+			duplicatedAdmins = append(duplicatedAdmins, admin)
+		}
+	}
+
+	hashStats := hashStats{
+		disabledAccounts: parsedSecrets.disabledAccounts,
+		hashes:           len(parsedSecrets.indexedHashes),
+		domains:          parsedSecrets.domains,
+		blankPasswords:   parsedSecrets.blankPasswords,
+		duplicatedHashes: len(duplicatedHashes),
+		enabledAccounts:  parsedSecrets.enabledAccounts,
+		computerAccounts: parsedSecrets.computerAccounts,
+		lmHashes:         len(parsedSecrets.lmHashes),
+		duplicatedAdmins: duplicatedAdmins,
+	}
+
+	if err := writeToCsv(NtlmCsvRecords, "duplicate_hashes.csv"); err != nil {
+		log.Fatal(err)
+	}
+
+	if err := writeToCsv(parsedSecrets.lmHashes, "lm_hashes.csv"); err != nil {
+		log.Fatal(err)
+	}
+
+	if err := writeLatex(strings.TrimSpace(strings.Join(lines, ""))); err != nil {
+		log.Fatal(err)
+	}
+
+	printData(hashStats, all)
+}
+
+// Could of course just import the slices pkg, but this was a simple stack overflow solution
+func contains(elems []string, v string) bool {
+	for _, s := range elems {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+type parsedSecrets struct {
+	indexedHashes    map[string][]string
+	enabledAccounts  int
+	disabledAccounts int
+	computerAccounts int
+	blankPasswords   int
+	domains          []string
+	lmHashes         [][]string
+	admins           map[string]string
+}
+
+func parseSecrets(secrets []string, all bool, admins map[string]string) (parsedSecrets, error) {
+	indexedHashes := make(map[string][]string)
+	enabledAccounts := 0
+	disabledAccounts := 0
+	computerAccounts := 0
+	blankPasswords := 0
+	domains := make([]string, 0)
+	lmHashes := make([][]string, 0)
 
 	for _, secret := range secrets {
 		h, err := parseLine(secret)
@@ -81,7 +170,8 @@ func main() {
 			// Is it worth trying to skip to the next iteration with 'continue'?
 			// problem is that these files can contain thousands of lines. I don't want an error for each line.
 			// then my only proposal is an errLineCount or something. if errLineCount >= 3 log.fatal...
-			log.Fatal(err)
+			// log.Fatal(err)
+			return parsedSecrets{}, fmt.Errorf("error reading file: %s", secrets)
 		}
 
 		if h.Enabled {
@@ -127,69 +217,15 @@ func main() {
 		}
 
 	}
-
-	for key, element := range indexedHashes {
-		mergedHashes = append(mergedHashes, mergedHash{Count: len(element), Hash: key, Users: element})
-	}
-
-	sort.Slice(mergedHashes, func(i, j int) bool {
-		return mergedHashes[i].Count > mergedHashes[j].Count
-	})
-
-	var lines []string
-
-	for _, element := range mergedHashes {
-		if element.Count > 1 {
-			duplicatedHashes[element.Hash] = element
-			NtlmCsvRecords = append(NtlmCsvRecords, []string{strconv.Itoa(element.Count), element.Hash, strings.Join(element.Users, " - ")})
-			// validate hash length
-			maskedHash := element.Hash[:5] + strings.Repeat("*", 12) + element.Hash[27:]
-			lines = append(lines, fmt.Sprintf("\t\t%s & %d \\\\\n", maskedHash, element.Count))
-
-		}
-	}
-
-	for admin, hash := range admins {
-		if _, ok := duplicatedHashes[hash]; ok {
-			duplicatedAdmins = append(duplicatedAdmins, admin)
-		}
-	}
-
-	hashStats := hashStats{
-		disabledAccounts: disabledAccounts,
-		hashes:           len(indexedHashes),
+	return parsedSecrets{
+		indexedHashes:    indexedHashes,
 		domains:          domains,
 		blankPasswords:   blankPasswords,
-		duplicatedHashes: len(duplicatedHashes),
 		enabledAccounts:  enabledAccounts,
-		computerAccounts: computerAccounts,
-		lmHashes:         len(lmHashes),
-		duplicatedAdmins: duplicatedAdmins,
-	}
-
-	if err := writeToCsv(NtlmCsvRecords, "duplicate_hashes.csv"); err != nil {
-		log.Fatal(err)
-	}
-
-	if err := writeToCsv(lmHashes, "lm_hashes.csv"); err != nil {
-		log.Fatal(err)
-	}
-
-	if err := writeLatex(strings.TrimSpace(strings.Join(lines, ""))); err != nil {
-		log.Fatal(err)
-	}
-
-	printData(hashStats, all)
-}
-
-// Could of course just import the slices pkg, but this was a simple stack overflow solution
-func contains(elems []string, v string) bool {
-	for _, s := range elems {
-		if v == s {
-			return true
-		}
-	}
-	return false
+		disabledAccounts: disabledAccounts,
+		admins:           admins,
+		lmHashes:         lmHashes,
+	}, nil
 }
 
 func loadDump(secretsFile string) ([]string, error) {

@@ -13,3 +13,4 @@ domain.local\User12:1361:aad3b435b51404eeaad3b435b51404ee:76C3C842E507DA1F37B954
 domain.local\User13:1361:aad3b435b51404eeaad3b435b51404ee:76C3C842E507DA1F37B954C139080A15::: (status=Enabled)
 domain.local\User14:1361:aad3b435b51404eeaad3b435b51404ee:76C3C842E507DA1F37B954C139080A15::: (status=Enabled)
 domain.local\Hacker:1361:aad3b435b51404eeaad3b435b51404ee:4D6CDEFF2AB7EB7E80FBAEE642585900::: (status=Enabled)
+domain.local\Hacker2:1361:aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0::: (status=Enabled)
