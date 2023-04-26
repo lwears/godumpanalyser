@@ -72,6 +72,9 @@ func main() {
 		log.Fatalf("Error parsing secrets %s", err)
 	}
 
+	// Maybe look at moving this into parseSecrets.
+	// the only other thing indexedHashes is needed for outside is the length
+	// Maybe just add a count in parseSecrets
 	for key, element := range parsedSecrets.indexedHashes {
 		mergedHashes = append(mergedHashes, mergedHash{Count: len(element), Hash: key, Users: element})
 	}
