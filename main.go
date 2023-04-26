@@ -48,16 +48,8 @@ func main() {
 	secretsFile := flag.Arg(0)
 	adminsFile := flag.Arg(1)
 
-	// indexedHashes := make(map[string][]string)
 	mergedHashes := make([]mergedHash, 0)
-
-	// enabledAccounts := 0
-	// disabledAccounts := 0
-	// computerAccounts := 0
-	// blankPasswords := 0
 	duplicatedHashes := make(map[string]mergedHash)
-	// lmHashes := make([][]string, 0)
-	// domains := make([]string, 0)
 	duplicatedAdmins := make([]string, 0)
 	NtlmCsvRecords := [][]string{{"Count", "Hash", "Users"}}
 
