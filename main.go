@@ -48,11 +48,6 @@ func main() {
 	secretsFile := flag.Arg(0)
 	adminsFile := flag.Arg(1)
 
-	mergedHashes := make([]mergedHash, 0)
-	duplicatedHashes := make(map[string]mergedHash)
-	duplicatedAdmins := make([]string, 0)
-	NtlmCsvRecords := [][]string{{"Count", "Hash", "Users"}}
-
 	if secretsFile == "" {
 		log.Fatal("No Secrets file passed")
 	}
@@ -72,49 +67,7 @@ func main() {
 		log.Fatalf("Error parsing secrets %s", err)
 	}
 
-	// Maybe look at moving this into parseSecrets.
-	// the only other thing indexedHashes is needed for outside is the length
-	// Maybe just add a count in parseSecrets
-	for key, element := range parsedSecrets.indexedHashes {
-		mergedHashes = append(mergedHashes, mergedHash{Count: len(element), Hash: key, Users: element})
-	}
-
-	sort.Slice(mergedHashes, func(i, j int) bool {
-		return mergedHashes[i].Count > mergedHashes[j].Count
-	})
-
-	var lines []string
-
-	for _, element := range mergedHashes {
-		if element.Count > 1 {
-			duplicatedHashes[element.Hash] = element
-			NtlmCsvRecords = append(NtlmCsvRecords, []string{strconv.Itoa(element.Count), element.Hash, strings.Join(element.Users, " - ")})
-			// validate hash length
-			maskedHash := element.Hash[:5] + strings.Repeat("*", 12) + element.Hash[27:]
-			lines = append(lines, fmt.Sprintf("\t\t%s & %d \\\\\n", maskedHash, element.Count))
-
-		}
-	}
-
-	for admin, hash := range admins {
-		if _, ok := duplicatedHashes[hash]; ok {
-			duplicatedAdmins = append(duplicatedAdmins, admin)
-		}
-	}
-
-	hashStats := hashStats{
-		disabledAccounts: parsedSecrets.disabledAccounts,
-		hashes:           len(parsedSecrets.indexedHashes),
-		domains:          parsedSecrets.domains,
-		blankPasswords:   parsedSecrets.blankPasswords,
-		duplicatedHashes: len(duplicatedHashes),
-		enabledAccounts:  parsedSecrets.enabledAccounts,
-		computerAccounts: parsedSecrets.computerAccounts,
-		lmHashes:         len(parsedSecrets.lmHashes),
-		duplicatedAdmins: duplicatedAdmins,
-	}
-
-	if err := writeToCsv(NtlmCsvRecords, "duplicate_hashes.csv"); err != nil {
+	if err := writeToCsv(parsedSecrets.ntlmCsvRecords, "duplicate_hashes.csv"); err != nil {
 		log.Fatal(err)
 	}
 
@@ -122,11 +75,11 @@ func main() {
 		log.Fatal(err)
 	}
 
-	if err := writeLatex(strings.TrimSpace(strings.Join(lines, ""))); err != nil {
+	if err := writeLatex(parsedSecrets.latexLines); err != nil {
 		log.Fatal(err)
 	}
 
-	printData(hashStats, all)
+	printData(parsedSecrets.hashStats, all)
 }
 
 // Could of course just import the slices pkg, but this was a simple stack overflow solution
@@ -140,24 +93,27 @@ func contains(elems []string, v string) bool {
 }
 
 type parsedSecrets struct {
-	indexedHashes    map[string][]string
-	enabledAccounts  int
-	disabledAccounts int
-	computerAccounts int
-	blankPasswords   int
-	domains          []string
-	lmHashes         [][]string
-	admins           map[string]string
+	mergedHashes   []mergedHash
+	admins         map[string]string
+	ntlmCsvRecords [][]string
+	latexLines     string
+	hashStats      hashStats
+	lmHashes       [][]string
 }
 
 func parseSecrets(secrets []string, all bool, admins map[string]string) (parsedSecrets, error) {
 	indexedHashes := make(map[string][]string)
+	totalHashes := 0
 	enabledAccounts := 0
 	disabledAccounts := 0
 	computerAccounts := 0
 	blankPasswords := 0
 	domains := make([]string, 0)
 	lmHashes := make([][]string, 0)
+	mergedHashes := make([]mergedHash, 0)
+	duplicatedHashes := make(map[string]mergedHash)
+	duplicatedAdmins := make([]string, 0)
+	ntlmCsvRecords := [][]string{{"Count", "Hash", "Users"}}
 
 	for _, secret := range secrets {
 		h, err := parseLine(secret)
@@ -168,6 +124,8 @@ func parseSecrets(secrets []string, all bool, admins map[string]string) (parsedS
 			// log.Fatal(err)
 			return parsedSecrets{}, fmt.Errorf("error reading file: %s", secrets)
 		}
+
+		totalHashes++
 
 		if h.Enabled {
 			enabledAccounts++
@@ -212,14 +170,51 @@ func parseSecrets(secrets []string, all bool, admins map[string]string) (parsedS
 		}
 
 	}
+
+	for key, element := range indexedHashes {
+		mergedHashes = append(mergedHashes, mergedHash{Count: len(element), Hash: key, Users: element})
+	}
+
+	sort.Slice(mergedHashes, func(i, j int) bool {
+		return mergedHashes[i].Count > mergedHashes[j].Count
+	})
+
+	var latexLines []string
+
+	for _, element := range mergedHashes {
+		if element.Count > 1 {
+			duplicatedHashes[element.Hash] = element
+			ntlmCsvRecords = append(ntlmCsvRecords, []string{strconv.Itoa(element.Count), element.Hash, strings.Join(element.Users, " - ")})
+			// validate hash length
+			maskedHash := element.Hash[:5] + strings.Repeat("*", 12) + element.Hash[27:]
+			latexLines = append(latexLines, fmt.Sprintf("\t\t%s & %d \\\\\n", maskedHash, element.Count))
+
+		}
+	}
+
+	for admin, hash := range admins {
+		if _, ok := duplicatedHashes[hash]; ok {
+			duplicatedAdmins = append(duplicatedAdmins, admin)
+		}
+	}
+
 	return parsedSecrets{
-		indexedHashes:    indexedHashes,
-		domains:          domains,
-		blankPasswords:   blankPasswords,
-		enabledAccounts:  enabledAccounts,
-		disabledAccounts: disabledAccounts,
-		admins:           admins,
-		lmHashes:         lmHashes,
+		hashStats: hashStats{
+			hashes:           totalHashes,
+			disabledAccounts: disabledAccounts,
+			enabledAccounts:  enabledAccounts,
+			domains:          domains,
+			blankPasswords:   blankPasswords,
+			duplicatedHashes: len(duplicatedHashes),
+			computerAccounts: computerAccounts,
+			duplicatedAdmins: duplicatedAdmins,
+			lmHashes:         len(lmHashes),
+		},
+		mergedHashes:   mergedHashes,
+		admins:         admins,
+		lmHashes:       lmHashes,
+		ntlmCsvRecords: ntlmCsvRecords,
+		latexLines:     strings.TrimSpace(strings.Join(latexLines, "")),
 	}, nil
 }
 
