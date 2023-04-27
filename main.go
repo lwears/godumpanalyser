@@ -366,4 +366,3 @@ func printData(v hashStats, all bool) {
 
 // TODO:
 // -threshhold for duplicates count 2,3,4 / exclude default to more than 1
-// stop when line blank

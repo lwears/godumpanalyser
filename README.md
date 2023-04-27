@@ -13,7 +13,7 @@ It will also output a simple text file with the latex code to copy and paste the
 domain.local\User1:2202:aad3b435b51404eeaad3b435b51404e1:64F12CDDAA88057E06A81B54E73B949B::: (status=Enabled)
 ```
 
-> **_NOTE:_** The inclusion of the account status at the end is not default when using secretsdump
+> **_NOTE:_** The inclusion of the account status at the end is not default when using secretsdump `-user-status`
 
 ## Useage example
 
