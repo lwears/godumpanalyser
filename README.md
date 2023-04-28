@@ -3,8 +3,8 @@ Golang Password Parser for output AFTER first parsing with impackets secretsdump
 
 ## AD Dump Analyser
 
-This will parse the ADdump.ntds returned from impackets secretsdump and give some general statstics.
-It will output a CSV file of duplicated passwords in the format Count,Hash,Users
+This will parse the ADdump.ntds returned from impackets secretsdump (`-user-status`) and give some general statstics.
+It will output a CSV file of duplicated passwords in the format `Count,Hash,Users`
 It will also output a simple text file with the latex code to copy and paste the duplicated hashes directly into the report.
 
 ## Input Example
@@ -45,6 +45,26 @@ Admins: ["domainAdmin1"]
 
 Latex Table output to latex_table.txt
 CSV output to duplicated_hashes.txt
+```
+
+### LaTeX Output Example
+
+```latex
+\begin{table}[H]
+    \centering
+    \begin{tabular}{l | l}
+        \textbf{Hash value} & \textbf{Count} \\
+        \hline
+        0e574************c1769 & 3 \\
+		76C3C************80A15 & 3 \\
+		58A47************FDB71 & 2 \\
+		7B23F************BEB5B & 2 \\
+		F7A80************E967C & 2 \\
+        \hline
+    \end{tabular}
+    \caption{Passwords most shared between AD accounts}
+\end{table}
+
 ```
 
 ## Todo
