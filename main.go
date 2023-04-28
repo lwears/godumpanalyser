@@ -366,3 +366,4 @@ func printData(v hashStats, all bool) {
 
 // TODO:
 // -threshhold for duplicates count 2,3,4 / exclude default to more than 1
+// Only output 'included admins' if admins file passed
