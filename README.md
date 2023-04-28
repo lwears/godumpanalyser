@@ -17,7 +17,7 @@ domain.local\User1:2202:aad3b435b51404eeaad3b435b51404e1:64F12CDDAA88057E06A81B5
 
 ## Useage example
 
-You can pass 2 files as parameters
+You can pass 2 files as parameters, admins is optional
 
 
 ```shell
