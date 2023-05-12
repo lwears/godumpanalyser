@@ -194,7 +194,7 @@ func parseSecrets(secrets []string, all bool, admins map[string]string) (parsedS
 
 	for admin, hash := range admins {
 		if _, ok := duplicatedHashes[hash]; ok {
-			duplicatedAdmins = append(duplicatedAdmins, admin)
+			duplicatedAdmins = append(duplicatedAdmins, strings.ToLower(admin))
 		}
 	}
 
@@ -253,13 +253,14 @@ func loadAdmins(adminsFile string) (map[string]string, error) {
 		sc := bufio.NewScanner(file)
 
 		for sc.Scan() {
-			admin := sc.Text()
+			admin := strings.TrimSpace(strings.ToLower(sc.Text()))
 			if admin != "" {
 				admins[admin] = ""
 			}
 		}
 		file.Close()
 	}
+	fmt.Print(admins)
 	return admins, nil
 }
 
