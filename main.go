@@ -186,7 +186,7 @@ func parseSecrets(secrets []string, all bool, admins map[string]string) (parsedS
 			duplicatedHashes[element.Hash] = element
 			ntlmCsvRecords = append(ntlmCsvRecords, []string{strconv.Itoa(element.Count), element.Hash, strings.Join(element.Users, " - ")})
 			// validate hash length
-			maskedHash := element.Hash[:5] + strings.Repeat("*", 12) + element.Hash[27:]
+			maskedHash := element.Hash[:4] + strings.Repeat("*", 14) + element.Hash[28:]
 			latexLines = append(latexLines, fmt.Sprintf("\t\t%s & %d \\\\\n", maskedHash, element.Count))
 
 		}
