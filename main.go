@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/fatih/color"
+	"github.com/pkg/errors"
 	"github.com/thoas/go-funk"
 )
 
@@ -120,50 +121,50 @@ func ReadOptions() (*Options, error) {
 }
 
 func LoadAdmins(adminsFile string, stats *Stats) error {
-	if adminsFile != "" {
-		file, err := os.Open(adminsFile)
-		if err != nil {
-			return fmt.Errorf("error reading file: %s", adminsFile)
-		}
-
-		defer file.Close()
-
-		sc := bufio.NewScanner(file)
-
-		for sc.Scan() {
-			admin := strings.TrimSpace(strings.ToLower(sc.Text()))
-			if admin != "" {
-				stats.admins[admin] = ""
-			}
-		}
-		file.Close()
+	if adminsFile == "" {
+		return errors.New("Empty admins argument")
 	}
+
+	file, err := os.Open(adminsFile)
+	if err != nil {
+		return fmt.Errorf("error reading file: %s", adminsFile)
+	}
+
+	defer file.Close()
+
+	sc := bufio.NewScanner(file)
+
+	for sc.Scan() {
+		admin := strings.TrimSpace(strings.ToLower(sc.Text()))
+		if admin != "" {
+			stats.admins[admin] = ""
+		}
+	}
+	file.Close()
 	return nil
 }
 
 func LoadFileAndProcess(secretsFile string, includeDisabled bool, stats *Stats, idxHashes IndexedHashes) error {
-	if secretsFile != "" {
-		file, err := os.Open(secretsFile)
+	file, err := os.Open(secretsFile)
+	if err != nil {
+		return fmt.Errorf("error reading file: %s", secretsFile)
+	}
+
+	defer file.Close()
+
+	sc := bufio.NewScanner(file)
+
+	for sc.Scan() {
+		ph, err := ParseHash(sc.Text(), stats.admins)
 		if err != nil {
-			return fmt.Errorf("error reading file: %s", secretsFile)
+			// Is it worth trying to skip to the next iteration with 'continue'?
+			// problem is that these files can contain thousands of lines. I don't want an error for each line.
+			// then my only proposal is an errLineCount or something. if errLineCount >= 3 log.fatal...
+			// log.Fatal(err)
+			return fmt.Errorf("error reading hash line: %s", sc.Text())
 		}
-
-		defer file.Close()
-
-		sc := bufio.NewScanner(file)
-
-		for sc.Scan() {
-			ph, err := ParseHash(sc.Text(), stats.admins)
-			if err != nil {
-				// Is it worth trying to skip to the next iteration with 'continue'?
-				// problem is that these files can contain thousands of lines. I don't want an error for each line.
-				// then my only proposal is an errLineCount or something. if errLineCount >= 3 log.fatal...
-				// log.Fatal(err)
-				return fmt.Errorf("error reading hash line: %s", sc.Text())
-			}
-			AddToStats(ph, stats, includeDisabled)
-			idxHashes[ph.NTLM] = append(idxHashes[ph.NTLM], ph.User)
-		}
+		AddToStats(ph, stats, includeDisabled)
+		idxHashes[ph.NTLM] = append(idxHashes[ph.NTLM], ph.User)
 	}
 	return nil
 }
