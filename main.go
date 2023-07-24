@@ -7,245 +7,123 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/fatih/color"
+	"github.com/thoas/go-funk"
 )
 
-type hash struct {
-	Domain  string
-	User    string
-	LM      string
-	NTLM    string
-	Enabled bool
+const BLANK_NTLM = "31d6cfe0d16ae931b73c59d7e0c089c0"
+
+const BLANK_LM = "aad3b435b51404eeaad3b435b51404ee"
+
+type Options struct {
+	SecretsFile     string
+	AdminsFile      string
+	IncludeDisabled bool
 }
 
-type mergedHash struct {
-	Users []string
-	Count int
-	Hash  string
+type HashStat struct {
+	users []string
+	count int
+	hash  string
 }
 
-type hashStats struct {
+type IndexedHashes = map[string][]string
+
+type Stats struct {
 	hashes           int
 	enabledAccounts  int
 	disabledAccounts int
 	computerAccounts int
-	duplicatedHashes int
-	lmHashes         int
 	blankPasswords   int
 	domains          []string
-	duplicatedAdmins []string
+	lmHashes         [][]string
+	admins           map[string]string
+}
+
+type Hash struct {
+	Domain     string
+	User       string
+	LM         string
+	NTLM       string
+	Enabled    bool
+	isComputer bool
+	isAdmin    bool
+}
+
+type DuplicatedHashes = map[string]HashStat
+
+type BuiltStats struct {
+	latexLines       []string
+	ntlmCsvRecords   [][]string
+	duplicatedHashes DuplicatedHashes
 }
 
 func main() {
-	var all bool
-	flag.BoolVar(&all, "all", false, "include disabled accounts in results")
-	flag.Parse()
 
-	secretsFile := flag.Arg(0)
-	adminsFile := flag.Arg(1)
-
-	if secretsFile == "" {
-		log.Fatal("No Secrets file passed")
+	var stats = Stats{
+		admins: make(map[string]string),
 	}
 
-	secrets, err := loadDump(secretsFile)
+	indexedHashes := make(map[string][]string)
+
+	opts, err := ReadOptions()
 	if err != nil {
-		log.Fatalf("Error loading secrets: %s", err)
+		log.Fatal()
 	}
 
-	admins, err := loadAdmins(adminsFile)
+	err = LoadAdmins(opts.AdminsFile, &stats)
 	if err != nil {
 		log.Fatalf("Error loading admins: %s", err)
 	}
 
-	parsedSecrets, err := parseSecrets(secrets, all, admins)
+	err = LoadFileAndProcess(opts.SecretsFile, opts.IncludeDisabled, &stats, indexedHashes)
 	if err != nil {
-		log.Fatalf("Error parsing secrets %s", err)
+		log.Fatalf("Error loading secrets: %s", err)
 	}
 
-	if err := writeToCsv(parsedSecrets.ntlmCsvRecords, "duplicate_hashes.csv"); err != nil {
+	builtStats := BuildMoreStats(indexedHashes)
+
+	duplicatedAdmins := FindDuplicateAdmins(builtStats.duplicatedHashes, stats.admins)
+
+	stats.PrintSummary(len(builtStats.duplicatedHashes), duplicatedAdmins, opts.IncludeDisabled)
+
+	if err := WriteToCSV(builtStats.ntlmCsvRecords, "duplicate_hashes.csv"); err != nil {
 		log.Fatal(err)
 	}
 
-	if err := writeToCsv(parsedSecrets.lmHashes, "lm_hashes.csv"); err != nil {
+	if err := WriteToCSV(stats.lmHashes, "lm_hashes.csv"); err != nil {
 		log.Fatal(err)
 	}
 
-	if err := writeLatex(parsedSecrets.latexLines); err != nil {
+	if err := WriteLaTeX(builtStats.latexLines); err != nil {
 		log.Fatal(err)
 	}
 
-	printData(parsedSecrets.hashStats, all)
 }
 
-// Could of course just import the slices pkg, but this was a simple stack overflow solution
-func contains(elems []string, v string) bool {
-	for _, s := range elems {
-		if v == s {
-			return true
-		}
+func ReadOptions() (*Options, error) {
+	cfg := &Options{}
+	flag.BoolVar(&cfg.IncludeDisabled, "all", false, "include disabled accounts in results")
+	flag.Parse()
+
+	cfg.SecretsFile = flag.Arg(0)
+	cfg.AdminsFile = flag.Arg(1)
+
+	if cfg.SecretsFile == "" {
+		log.Fatal("No Secrets file passed")
 	}
-	return false
+
+	return cfg, nil
 }
 
-type parsedSecrets struct {
-	mergedHashes   []mergedHash
-	admins         map[string]string
-	ntlmCsvRecords [][]string
-	latexLines     string
-	hashStats      hashStats
-	lmHashes       [][]string
-}
-
-func parseSecrets(secrets []string, all bool, admins map[string]string) (parsedSecrets, error) {
-	indexedHashes := make(map[string][]string)
-	totalHashes := 0
-	enabledAccounts := 0
-	disabledAccounts := 0
-	computerAccounts := 0
-	blankPasswords := 0
-	domains := make([]string, 0)
-	lmHashes := make([][]string, 0)
-	mergedHashes := make([]mergedHash, 0)
-	duplicatedHashes := make(map[string]mergedHash)
-	duplicatedAdmins := make([]string, 0)
-	ntlmCsvRecords := [][]string{{"Count", "Hash", "Users"}}
-
-	for _, secret := range secrets {
-		h, err := parseLine(secret)
-		if err != nil {
-			// Is it worth trying to skip to the next iteration with 'continue'?
-			// problem is that these files can contain thousands of lines. I don't want an error for each line.
-			// then my only proposal is an errLineCount or something. if errLineCount >= 3 log.fatal...
-			// log.Fatal(err)
-			return parsedSecrets{}, fmt.Errorf("error reading file: %s", secrets)
-		}
-
-		totalHashes++
-
-		if h.Enabled {
-			enabledAccounts++
-		} else {
-			disabledAccounts++
-		}
-
-		if strings.Contains(h.User, "$") {
-			computerAccounts++
-		}
-
-		if !all && !h.Enabled {
-			continue
-		}
-
-		if strings.Contains(h.NTLM, "31d6cfe0d16ae931b73c59d7e0c089c0") {
-			blankPasswords++
-		}
-
-		if h.Domain != "" && !contains(domains, strings.ToLower(h.Domain)) {
-			domains = append(domains, strings.ToLower(h.Domain))
-		}
-
-		indexedHashes[h.NTLM] = append(indexedHashes[h.NTLM], h.User)
-
-		// In go we can combine variable declarations into our if statement and they’ll be within the scope of that if statement. Like this:
-		// In this example imagine everything before the ; is just on the previous line of code. But what it means is that the ok variable will get cleaned up at the end of the if block and
-		// won’t exist outside of the scope of the if block. Otherwise most of it looks pretty standard, maybe if I get home and understand what you’re doing a bit more I’ll have more
-		if _, ok := admins[h.User]; ok {
-			admins[h.User] = h.NTLM
-		}
-
-		// The above instead of this.
-		// _, ok := admins[h.User]
-		// if ok {
-		// 	admins[h.User] = h.NTLM
-		// }
-
-		// check if lm hash is blank value
-		if !strings.Contains(h.LM, "aad3b435b51404eeaad3b435b51404ee") {
-			lmHashes = append(lmHashes, []string{h.User, h.LM})
-		}
-
-	}
-
-	for key, element := range indexedHashes {
-		mergedHashes = append(mergedHashes, mergedHash{Count: len(element), Hash: key, Users: element})
-	}
-
-	sort.Slice(mergedHashes, func(i, j int) bool {
-		return mergedHashes[i].Count > mergedHashes[j].Count
-	})
-
-	var latexLines []string
-
-	for _, element := range mergedHashes {
-		if element.Count > 1 {
-			duplicatedHashes[element.Hash] = element
-			ntlmCsvRecords = append(ntlmCsvRecords, []string{strconv.Itoa(element.Count), element.Hash, strings.Join(element.Users, " - ")})
-			// validate hash length
-			maskedHash := element.Hash[:4] + strings.Repeat("*", 14) + element.Hash[28:]
-			latexLines = append(latexLines, fmt.Sprintf("\t\t%s & %d \\\\\n", maskedHash, element.Count))
-
-		}
-	}
-
-	for admin, hash := range admins {
-		if _, ok := duplicatedHashes[hash]; ok {
-			duplicatedAdmins = append(duplicatedAdmins, strings.ToLower(admin))
-		}
-	}
-
-	return parsedSecrets{
-		hashStats: hashStats{
-			hashes:           totalHashes,
-			disabledAccounts: disabledAccounts,
-			enabledAccounts:  enabledAccounts,
-			domains:          domains,
-			blankPasswords:   blankPasswords,
-			duplicatedHashes: len(duplicatedHashes),
-			computerAccounts: computerAccounts,
-			duplicatedAdmins: duplicatedAdmins,
-			lmHashes:         len(lmHashes),
-		},
-		mergedHashes:   mergedHashes,
-		admins:         admins,
-		lmHashes:       lmHashes,
-		ntlmCsvRecords: ntlmCsvRecords,
-		latexLines:     strings.TrimSpace(strings.Join(latexLines, "")),
-	}, nil
-}
-
-func loadDump(secretsFile string) ([]string, error) {
-	secrets := make([]string, 0)
-
-	if secretsFile != "" {
-		file, err := os.Open(secretsFile)
-		if err != nil {
-			return secrets, fmt.Errorf("error reading file: %s", secrets)
-		}
-
-		defer file.Close()
-
-		sc := bufio.NewScanner(file)
-
-		for sc.Scan() {
-			secrets = append(secrets, sc.Text())
-		}
-	}
-
-	return secrets, nil
-}
-
-func loadAdmins(adminsFile string) (map[string]string, error) {
-	admins := make(map[string]string)
-
+func LoadAdmins(adminsFile string, stats *Stats) error {
 	if adminsFile != "" {
 		file, err := os.Open(adminsFile)
 		if err != nil {
-			return admins, fmt.Errorf("error reading file: %s", adminsFile)
+			return fmt.Errorf("error reading file: %s", adminsFile)
 		}
 
 		defer file.Close()
@@ -255,16 +133,108 @@ func loadAdmins(adminsFile string) (map[string]string, error) {
 		for sc.Scan() {
 			admin := strings.TrimSpace(strings.ToLower(sc.Text()))
 			if admin != "" {
-				admins[admin] = ""
+				stats.admins[admin] = ""
 			}
 		}
 		file.Close()
 	}
-	fmt.Print(admins)
-	return admins, nil
+	return nil
 }
 
-func writeToCsv(records [][]string, filename string) error {
+func LoadFileAndProcess(secretsFile string, includeDisabled bool, stats *Stats, idxHashes IndexedHashes) error {
+	if secretsFile != "" {
+		file, err := os.Open(secretsFile)
+		if err != nil {
+			return fmt.Errorf("error reading file: %s", secretsFile)
+		}
+
+		defer file.Close()
+
+		sc := bufio.NewScanner(file)
+
+		for sc.Scan() {
+			ph, err := ParseHash(sc.Text(), stats.admins)
+			if err != nil {
+				// Is it worth trying to skip to the next iteration with 'continue'?
+				// problem is that these files can contain thousands of lines. I don't want an error for each line.
+				// then my only proposal is an errLineCount or something. if errLineCount >= 3 log.fatal...
+				// log.Fatal(err)
+				return fmt.Errorf("error reading hash line: %s", sc.Text())
+			}
+			AddToStats(ph, stats, includeDisabled)
+			idxHashes[ph.NTLM] = append(idxHashes[ph.NTLM], ph.User)
+		}
+	}
+	return nil
+}
+
+func AddToStats(h Hash, stats *Stats, all bool) {
+	stats.hashes++
+	if h.Enabled {
+		stats.enabledAccounts++
+	} else {
+		stats.disabledAccounts++
+	}
+
+	if h.isComputer {
+		stats.computerAccounts++
+	}
+
+	if !all && !h.Enabled {
+		return
+	}
+
+	if strings.Contains(h.NTLM, BLANK_NTLM) {
+		stats.blankPasswords++
+	}
+
+	if h.Domain != "" && !contains(stats.domains, strings.ToLower(h.Domain)) {
+		stats.domains = append(stats.domains, strings.ToLower(h.Domain))
+	}
+
+	if !strings.Contains(h.LM, BLANK_LM) {
+		stats.lmHashes = append(stats.lmHashes, []string{h.User, h.LM})
+	}
+
+	if h.isAdmin {
+		stats.admins[h.User] = h.NTLM
+	}
+}
+
+func BuildMoreStats(idxHashes IndexedHashes) BuiltStats {
+
+	keys := funk.Keys(idxHashes)
+
+	initialValue := BuiltStats{duplicatedHashes: make(map[string]HashStat), latexLines: make([]string, 0), ntlmCsvRecords: make([][]string, 0)}
+
+	r := funk.Reduce(keys, func(acc BuiltStats, key string) BuiltStats {
+		value := idxHashes[key]
+		if len(value) > 1 {
+			acc.duplicatedHashes[key] = HashStat{count: len(value), hash: key, users: value}
+			acc.ntlmCsvRecords = append(acc.ntlmCsvRecords, []string{strconv.Itoa(len(value)), key, strings.Join(value, " - ")})
+			maskedHash := key[:4] + strings.Repeat("*", 14) + key[28:]
+			acc.latexLines = append(acc.latexLines, fmt.Sprintf("\t\t%s & %d \\\\\n", maskedHash, len(value)))
+		}
+		return acc
+	}, initialValue)
+
+	result := r.(BuiltStats)
+
+	return result
+}
+
+func FindDuplicateAdmins(dupHashes DuplicatedHashes, admins map[string]string) []string {
+
+	duplicatedAdmins := make([]string, 0)
+	for admin, hash := range admins {
+		if _, ok := dupHashes[hash]; ok {
+			duplicatedAdmins = append(duplicatedAdmins, strings.ToLower(admin))
+		}
+	}
+	return duplicatedAdmins
+}
+
+func WriteToCSV(records [][]string, filename string) error {
 	csvFile, err := os.Create(filename)
 	if err != nil {
 		return fmt.Errorf("error creating file: %s", filename)
@@ -274,40 +244,50 @@ func writeToCsv(records [][]string, filename string) error {
 
 	csvWriter.WriteAll(records)
 
+	color.New(color.Bold, color.FgYellow).Printf("\nCSV File: %q saved", filename)
+
 	return nil
 }
 
-func writeLatex(lines string) error {
+func WriteLaTeX(lines []string) error {
+	builder := strings.Builder{}
 	filename := "latex_table.txt"
 	latexFile, err := os.Create(filename)
 	if err != nil {
 		return fmt.Errorf("error creating file: %s", filename)
 	}
 
-	latexString := strings.Replace(HASHES_LATEX, "%REPLACE_ME%", lines, 1)
+	for _, line := range lines {
+		builder.WriteString(line)
+	}
+
+	latexString := strings.Replace(HASHES_LATEX, "%REPLACE_ME%", strings.TrimSpace(builder.String()), 1)
 
 	latexFile.WriteString(latexString)
+
+	color.New(color.Bold, color.FgYellow).Printf("\nLatex Table output to %q\n", filename)
 
 	return nil
 }
 
-func parseLine(line string) (hash, error) {
+func ParseHash(line string, admins map[string]string) (Hash, error) {
 	if line == "" || !strings.Contains(line, ":") {
-		return hash{}, fmt.Errorf("line blank or incorrect format: %s", line)
+		return Hash{}, fmt.Errorf("line blank or incorrect format: %s", line)
 	}
 
 	s := strings.Split(line, ":")
 
 	if len(s) < 7 || len(s[3]) != 32 {
-		return hash{}, fmt.Errorf("error reading line: %s", line)
+		return Hash{}, fmt.Errorf("error reading line: %s", line)
 	}
 
-	upn := strings.Split(s[0], "\\")
+	upn := strings.Split(strings.ToLower(s[0]), "\\")
 
-	h := hash{
-		LM:      s[2],
-		NTLM:    s[3],
-		Enabled: strings.Contains(s[6], "Enabled"),
+	h := Hash{
+		LM:         s[2],
+		NTLM:       s[3],
+		Enabled:    strings.Contains(s[6], "Enabled"),
+		isComputer: strings.Contains(s[0], "$"),
 	}
 
 	if len(upn) > 1 {
@@ -317,18 +297,29 @@ func parseLine(line string) (hash, error) {
 		h.User = upn[0]
 	}
 
+	if _, ok := admins[h.User]; ok {
+		h.isAdmin = true
+	}
+
 	return h, nil
 }
 
-func printData(v hashStats, all bool) {
-	printRed := color.New(color.Bold, color.FgRed).PrintlnFunc()
-	printGreen := color.New(color.Bold, color.FgGreen).PrintlnFunc()
-	printYellow := color.New(color.Bold, color.FgYellow).PrintlnFunc()
+func (s *Stats) PrintSummary(dupHashes int, duplicatedAdmins []string, all bool) {
+	red := color.New(color.Bold, color.FgRed)
+	green := color.New(color.Bold, color.FgGreen)
 
-	fmt.Println("\nTotal hashes:\t\t", v.hashes)
-	fmt.Println("Enabled Accounts:\t", v.enabledAccounts)
-	fmt.Println("Disabled Accounts:\t", v.disabledAccounts)
-	fmt.Println("Computer Accounts:\t", v.computerAccounts)
+	printRedGreen := func(p bool, args ...any) {
+		if p {
+			red.Println(args...)
+		} else {
+			green.Println(args...)
+		}
+	}
+
+	fmt.Println("\nTotal hashes:\t\t", s.hashes)
+	fmt.Println("Enabled Accounts:\t", s.enabledAccounts)
+	fmt.Println("Disabled Accounts:\t", s.disabledAccounts)
+	fmt.Println("Computer Accounts:\t", s.computerAccounts)
 
 	if all {
 		fmt.Println("\nDisabled Accounts INCLUDED")
@@ -336,33 +327,24 @@ func printData(v hashStats, all bool) {
 		fmt.Println("\nDisabled Accounts NOT included")
 	}
 
-	if v.lmHashes > 0 {
-		printRed("LM Hashes:\t\t", v.lmHashes)
-	} else {
-		printGreen("LM Hashes:\t\t", v.lmHashes)
-	}
+	printRedGreen(len(s.lmHashes) > 0, "LM Hashes:\t\t", len(s.lmHashes))
+	printRedGreen(s.blankPasswords > 0, "Blank Passwords:\t", s.blankPasswords)
+	printRedGreen(dupHashes > 0, "Duplicated Hashes:\t", dupHashes)
 
-	if v.blankPasswords > 0 {
-		printRed("Blank Passwords:\t", v.blankPasswords)
-	} else {
-		printGreen("Blank Passwords:\t", v.blankPasswords)
-	}
+	fmt.Println("Domains:\t\t", s.domains)
 
-	if v.duplicatedHashes > 0 {
-		printRed("Duplicated Hashes:\t", v.duplicatedHashes)
-	} else {
-		printGreen("Duplicated Hashes:\t", v.duplicatedHashes)
-	}
+	printRedGreen(len(duplicatedAdmins) > 0, "Included Admins:\t", duplicatedAdmins)
 
-	fmt.Println("Domains:\t\t", v.domains)
-	if len(v.duplicatedAdmins) > 0 {
-		printRed("Included Admins:\t", v.duplicatedAdmins)
-	} else {
-		printGreen("Included Admins:\t", v.duplicatedAdmins)
-	}
+}
 
-	printYellow("\nLatex Table output to latex_table.txt")
-	printYellow("CSV output to duplicated_hashes.txt")
+// Could of course just import the slices pkg, but this was a simple stack overflow solution
+func contains(elems []string, stats string) bool {
+	for _, s := range elems {
+		if stats == s {
+			return true
+		}
+	}
+	return false
 }
 
 // TODO:
