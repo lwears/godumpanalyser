@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -63,8 +64,7 @@ type BuiltStats struct {
 }
 
 func main() {
-
-	var stats = Stats{
+	stats := Stats{
 		admins: make(map[string]string),
 	}
 
@@ -102,7 +102,6 @@ func main() {
 	if err := WriteLaTeX(builtStats.latexLines); err != nil {
 		log.Fatal(err)
 	}
-
 }
 
 func ReadOptions() (*Options, error) {
@@ -189,7 +188,7 @@ func AddToStats(h Hash, stats *Stats, all bool) {
 		stats.blankPasswords++
 	}
 
-	if h.Domain != "" && !contains(stats.domains, strings.ToLower(h.Domain)) {
+	if h.Domain != "" && !slices.Contains(stats.domains, strings.ToLower(h.Domain)) {
 		stats.domains = append(stats.domains, strings.ToLower(h.Domain))
 	}
 
@@ -203,7 +202,6 @@ func AddToStats(h Hash, stats *Stats, all bool) {
 }
 
 func BuildMoreStats(idxHashes IndexedHashes) BuiltStats {
-
 	keys := funk.Keys(idxHashes)
 
 	initialValue := BuiltStats{duplicatedHashes: make(map[string]HashStat), latexLines: make([]string, 0), ntlmCsvRecords: make([][]string, 0)}
@@ -225,7 +223,6 @@ func BuildMoreStats(idxHashes IndexedHashes) BuiltStats {
 }
 
 func FindDuplicateAdmins(dupHashes DuplicatedHashes, admins map[string]string) []string {
-
 	duplicatedAdmins := make([]string, 0)
 	for admin, hash := range admins {
 		if _, ok := dupHashes[hash]; ok {
@@ -335,17 +332,6 @@ func (s *Stats) PrintSummary(dupHashes int, duplicatedAdmins []string, all bool)
 	fmt.Println("Domains:\t\t", s.domains)
 
 	printRedGreen(len(duplicatedAdmins) > 0, "Included Admins:\t", duplicatedAdmins)
-
-}
-
-// Could of course just import the slices pkg, but this was a simple stack overflow solution
-func contains(elems []string, stats string) bool {
-	for _, s := range elems {
-		if stats == s {
-			return true
-		}
-	}
-	return false
 }
 
 // TODO:
