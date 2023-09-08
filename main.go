@@ -20,6 +20,8 @@ const BLANK_NTLM = "31d6cfe0d16ae931b73c59d7e0c089c0"
 
 const BLANK_LM = "aad3b435b51404eeaad3b435b51404ee"
 
+const LATEX_FILENMAE = "latex_table.txt"
+
 type Options struct {
 	SecretsFile     string
 	AdminsFile      string
@@ -121,12 +123,12 @@ func ReadOptions() (*Options, error) {
 
 func LoadAdmins(adminsFile string, stats *Stats) error {
 	if adminsFile == "" {
-		return errors.New("Empty admins argument")
+		return errors.New("empty admins argument")
 	}
 
 	file, err := os.Open(adminsFile)
 	if err != nil {
-		return fmt.Errorf("error reading file: %s", adminsFile)
+		return fmt.Errorf("error reading file: %s", err)
 	}
 
 	defer file.Close()
@@ -139,7 +141,6 @@ func LoadAdmins(adminsFile string, stats *Stats) error {
 			stats.admins[admin] = ""
 		}
 	}
-	file.Close()
 	return nil
 }
 
@@ -162,13 +163,14 @@ func LoadFileAndProcess(secretsFile string, includeDisabled bool, stats *Stats, 
 			// log.Fatal(err)
 			return fmt.Errorf("error reading hash line: %s", sc.Text())
 		}
-		AddToStats(ph, stats, includeDisabled)
+		stats.AddToStats(ph, includeDisabled)
+		// AddToStats(ph, stats, includeDisabled)
 		idxHashes[ph.NTLM] = append(idxHashes[ph.NTLM], ph.User)
 	}
 	return nil
 }
 
-func AddToStats(h Hash, stats *Stats, all bool) {
+func (stats *Stats) AddToStats(h Hash, all bool) {
 	stats.hashes++
 	if h.Enabled {
 		stats.enabledAccounts++
@@ -249,10 +251,9 @@ func WriteToCSV(records [][]string, filename string) error {
 
 func WriteLaTeX(lines []string) error {
 	builder := strings.Builder{}
-	filename := "latex_table.txt"
-	latexFile, err := os.Create(filename)
+	latexFile, err := os.Create(LATEX_FILENMAE)
 	if err != nil {
-		return fmt.Errorf("error creating file: %s", filename)
+		return fmt.Errorf("error creating file: %s", err)
 	}
 
 	for _, line := range lines {
@@ -263,7 +264,7 @@ func WriteLaTeX(lines []string) error {
 
 	latexFile.WriteString(latexString)
 
-	color.New(color.Bold, color.FgYellow).Printf("\nLatex Table output to %q\n", filename)
+	color.New(color.Bold, color.FgYellow).Printf("\nLatex Table output to %q\n", LATEX_FILENMAE)
 
 	return nil
 }
