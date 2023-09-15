@@ -13,7 +13,6 @@ import (
 	"strings"
 
 	"github.com/fatih/color"
-	"github.com/thoas/go-funk"
 )
 
 const BLANK_NTLM = "31d6cfe0d16ae931b73c59d7e0c089c0"
@@ -204,24 +203,19 @@ func (stats *Stats) AddToStats(h Hash, all bool) {
 }
 
 func BuildMoreStats(idxHashes IndexedHashes) BuiltStats {
-	keys := funk.Keys(idxHashes)
+	builtStats := BuiltStats{duplicatedHashes: make(map[string]HashStat), latexLines: make([]string, 0), ntlmCsvRecords: make([][]string, 0)}
 
-	initialValue := BuiltStats{duplicatedHashes: make(map[string]HashStat), latexLines: make([]string, 0), ntlmCsvRecords: make([][]string, 0)}
-
-	r := funk.Reduce(keys, func(acc BuiltStats, key string) BuiltStats {
-		value := idxHashes[key]
+	for key, value := range idxHashes {
 		if len(value) > 1 {
-			acc.duplicatedHashes[key] = HashStat{count: len(value), hash: key, users: value}
-			acc.ntlmCsvRecords = append(acc.ntlmCsvRecords, []string{strconv.Itoa(len(value)), key, strings.Join(value, " - ")})
+			hashStat := HashStat{count: len(value), hash: key, users: value}
+			builtStats.duplicatedHashes[key] = hashStat
+			builtStats.ntlmCsvRecords = append(builtStats.ntlmCsvRecords, []string{strconv.Itoa(len(value)), key, strings.Join(value, " - ")})
 			maskedHash := key[:4] + strings.Repeat("*", 14) + key[28:]
-			acc.latexLines = append(acc.latexLines, fmt.Sprintf("\t\t%s & %d \\\\\n", maskedHash, len(value)))
+			builtStats.latexLines = append(builtStats.latexLines, fmt.Sprintf("\t\t%s & %d \\\\\n", maskedHash, len(value)))
 		}
-		return acc
-	}, initialValue)
+	}
 
-	result := r.(BuiltStats)
-
-	return result
+	return builtStats
 }
 
 func FindDuplicateAdmins(dupHashes DuplicatedHashes, admins map[string]string) []string {
