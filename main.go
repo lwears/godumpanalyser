@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"encoding/csv"
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -76,13 +75,11 @@ func main() {
 		log.Fatal()
 	}
 
-	err = LoadAdmins(opts.AdminsFile, &stats)
-	if err != nil {
+	if err := LoadAdmins(opts.AdminsFile, &stats); err != nil {
 		log.Fatalf("Error loading admins: %s", err)
 	}
 
-	err = LoadFileAndProcess(opts.SecretsFile, opts.IncludeDisabled, &stats, indexedHashes)
-	if err != nil {
+	if err := LoadFileAndProcess(opts.SecretsFile, opts.IncludeDisabled, &stats, indexedHashes); err != nil {
 		log.Fatalf("Error loading secrets: %s", err)
 	}
 
@@ -122,7 +119,7 @@ func ReadOptions() (*Options, error) {
 
 func LoadAdmins(adminsFile string, stats *Stats) error {
 	if adminsFile == "" {
-		return errors.New("empty admins argument")
+		return nil
 	}
 
 	file, err := os.Open(adminsFile)
