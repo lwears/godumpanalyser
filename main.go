@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -68,7 +69,7 @@ func main() {
 		admins: make(map[string]string),
 	}
 
-	indexedHashes := make(map[string][]string)
+	indexedHashes := make(IndexedHashes)
 
 	opts, err := ReadOptions()
 	if err != nil {
@@ -155,14 +156,19 @@ func LoadFileAndProcess(secretsFile string, includeDisabled bool, stats *Stats, 
 		if err != nil {
 			// Is it worth trying to skip to the next iteration with 'continue'?
 			// problem is that these files can contain thousands of lines. I don't want an error for each line.
-			// then my only proposal is an errLineCount or something. if errLineCount >= 3 log.fatal...
+			// then my only idea is an errLineCount or something. if errLineCount >= 3 log.fatal...
 			// log.Fatal(err)
 			return fmt.Errorf("error reading hash line: %s", sc.Text())
 		}
 		stats.AddToStats(ph, includeDisabled)
-		// AddToStats(ph, stats, includeDisabled)
+
 		idxHashes[ph.NTLM] = append(idxHashes[ph.NTLM], ph.User)
 	}
+
+	sort.Slice(stats.lmHashes, func(i, j int) bool {
+		return len(stats.lmHashes[i]) < len(stats.lmHashes[j])
+	})
+
 	return nil
 }
 
@@ -202,13 +208,19 @@ func (stats *Stats) AddToStats(h Hash, all bool) {
 func BuildMoreStats(idxHashes IndexedHashes) BuiltStats {
 	builtStats := BuiltStats{duplicatedHashes: make(map[string]HashStat), latexLines: make([]string, 0), ntlmCsvRecords: make([][]string, 0)}
 
-	for key, value := range idxHashes {
-		if len(value) > 1 {
-			hashStat := HashStat{count: len(value), hash: key, users: value}
-			builtStats.duplicatedHashes[key] = hashStat
-			builtStats.ntlmCsvRecords = append(builtStats.ntlmCsvRecords, []string{strconv.Itoa(len(value)), key, strings.Join(value, " - ")})
-			maskedHash := key[:4] + strings.Repeat("*", 14) + key[28:]
-			builtStats.latexLines = append(builtStats.latexLines, fmt.Sprintf("\t\t%s & %d \\\\\n", maskedHash, len(value)))
+	pairs := ToPairs[string, []string](idxHashes)
+
+	sort.Slice(pairs, func(i, j int) bool {
+		return len(pairs[i].Value) > len(pairs[j].Value)
+	})
+
+	for _, pair := range pairs {
+		if len(pair.Value) > 1 {
+			hashStat := HashStat{count: len(pair.Value), hash: pair.Key, users: pair.Value}
+			builtStats.duplicatedHashes[pair.Key] = hashStat
+			builtStats.ntlmCsvRecords = append(builtStats.ntlmCsvRecords, []string{strconv.Itoa(len(pair.Value)), pair.Key, strings.Join(pair.Value, " - ")})
+			maskedHash := pair.Key[:4] + strings.Repeat("*", 14) + pair.Key[28:]
+			builtStats.latexLines = append(builtStats.latexLines, fmt.Sprintf("\t\t%s & %d \\\\\n", maskedHash, len(pair.Value)))
 		}
 	}
 
@@ -323,9 +335,24 @@ func (s *Stats) PrintSummary(dupHashes int, duplicatedAdmins []string, all bool)
 
 	fmt.Println("Domains:\t\t", s.domains)
 
-	printRedGreen(len(duplicatedAdmins) > 0, "Included Admins:\t", duplicatedAdmins)
+	if len(s.admins) > 0 {
+		printRedGreen(len(duplicatedAdmins) > 0, "Included Admins:\t", duplicatedAdmins)
+	}
+}
+
+type KeyValue[K comparable, V any] struct {
+	Key   K
+	Value V
+}
+
+func ToPairs[K string, V any](slice map[K]V) []KeyValue[K, V] {
+	pairs := make([]KeyValue[K, V], len(slice))
+
+	for key, value := range slice {
+		pairs = append(pairs, KeyValue[K, V]{Key: key, Value: value})
+	}
+	return pairs
 }
 
 // TODO:
 // -threshhold for duplicates count 2,3,4 / exclude default to more than 1
-// Only output 'included admins' if admins file passed

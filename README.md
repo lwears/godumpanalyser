@@ -71,6 +71,4 @@ CSV output to duplicated_hashes.txt
 
 Implement this library: https://github.com/C-Sto/gosecretsdump
 
-duplicate threshold count flag `-threshold` 2/3/4/whatever
-
 goroutines to concurrently read all lines from file and then process multiple at once
