@@ -105,6 +105,15 @@ func main() {
 
 func ReadOptions() (*Options, error) {
 	cfg := &Options{}
+
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(),
+			"godumpanalyser\nDeveloped for analysing secretsdump output\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "Copyright 2023\n")
+		fmt.Fprintln(flag.CommandLine.Output(), "Usage information:")
+		flag.PrintDefaults()
+	}
+
 	flag.BoolVar(&cfg.IncludeDisabled, "all", false, "include disabled accounts in results")
 	flag.Parse()
 
@@ -112,7 +121,8 @@ func ReadOptions() (*Options, error) {
 	cfg.AdminsFile = flag.Arg(1)
 
 	if cfg.SecretsFile == "" {
-		log.Fatal("No Secrets file passed")
+		flag.Usage()
+		os.Exit(1)
 	}
 
 	return cfg, nil
@@ -172,16 +182,16 @@ func LoadFileAndProcess(secretsFile string, includeDisabled bool, stats *Stats, 
 	return nil
 }
 
-func (stats *Stats) AddToStats(h Hash, all bool) {
-	stats.hashes++
+func (s *Stats) AddToStats(h Hash, all bool) {
+	s.hashes++
 	if h.Enabled {
-		stats.enabledAccounts++
+		s.enabledAccounts++
 	} else {
-		stats.disabledAccounts++
+		s.disabledAccounts++
 	}
 
 	if h.isComputer {
-		stats.computerAccounts++
+		s.computerAccounts++
 	}
 
 	if !all && !h.Enabled {
@@ -189,22 +199,23 @@ func (stats *Stats) AddToStats(h Hash, all bool) {
 	}
 
 	if strings.Contains(h.NTLM, BLANK_NTLM) {
-		stats.blankPasswords++
+		s.blankPasswords++
 	}
 
-	if h.Domain != "" && !slices.Contains(stats.domains, strings.ToLower(h.Domain)) {
-		stats.domains = append(stats.domains, strings.ToLower(h.Domain))
+	if h.Domain != "" && !slices.Contains(s.domains, strings.ToLower(h.Domain)) {
+		s.domains = append(s.domains, strings.ToLower(h.Domain))
 	}
 
 	if !strings.Contains(h.LM, BLANK_LM) {
-		stats.lmHashes = append(stats.lmHashes, []string{h.User, h.LM})
+		s.lmHashes = append(s.lmHashes, []string{h.User, h.LM})
 	}
 
 	if h.isAdmin {
-		stats.admins[h.User] = h.NTLM
+		s.admins[h.User] = h.NTLM
 	}
 }
 
+// rename
 func BuildMoreStats(idxHashes IndexedHashes) BuiltStats {
 	builtStats := BuiltStats{duplicatedHashes: make(map[string]HashStat), latexLines: make([]string, 0), ntlmCsvRecords: make([][]string, 0)}
 
@@ -288,7 +299,7 @@ func ParseHash(line string, admins map[string]string) (Hash, error) {
 	h := Hash{
 		LM:         s[2],
 		NTLM:       s[3],
-		Enabled:    strings.Contains(s[6], "Enabled"),
+		Enabled:    !strings.Contains(strings.ToLower(s[6]), "disabled"),
 		isComputer: strings.Contains(s[0], "$"),
 	}
 

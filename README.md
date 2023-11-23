@@ -1,4 +1,5 @@
 # Go-Pass-Parser
+
 Golang Password Parser for output AFTER first parsing with impackets secretsdump
 
 ## AD Dump Analyser
@@ -19,16 +20,17 @@ domain.local\User1:2202:aad3b435b51404eeaad3b435b51404e1:64F12CDDAA88057E06A81B5
 
 You can pass 2 files as parameters, admins is optional
 
-
 ```shell
 go run . examples.txt admins.txt
 ```
 
 ## Flags
 
-`-all` This will force it to include all accounts
+##### Only relevant when passing a dumpfile with account status included!
 
-## Output 
+`-all` This will force it to include all accounts,
+
+## Output
 
 ```shell
 Total hashes: ##
